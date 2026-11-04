@@ -1,0 +1,1183 @@
+<!DOCTYPE html>
+<html lang="id" class="dark">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Arena Breakout - Tactical Loot Tracker Pro</title>
+
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: {
+                extend: {
+                    colors: {
+                        tactical: {
+                            bg: '#05070A',
+                            panel: '#0B0F17',
+                            card: '#111823',
+                            border: '#1E293B',
+                            gold: '#F59E0B',
+                            green: '#10B981',
+                            red: '#EF4444',
+                            blue: '#3B82F6',
+                            gray: '#64748B'
+                        }
+                    },
+                    fontFamily: {
+                        mono: ['Courier New', 'Courier', 'monospace']
+                    }
+                }
+            }
+        }
+    </script>
+
+    <!-- Supabase JS v2 & Chart.js -->
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+    <style>
+        /* ================= BACKGROUND & BASE ================= */
+        body {
+            background-color: #05070A;
+            background-image:
+                radial-gradient(circle at 50% 0%, rgba(245, 158, 11, 0.06) 0%, transparent 60%),
+                radial-gradient(circle at 100% 100%, rgba(59, 130, 246, 0.04) 0%, transparent 60%),
+                linear-gradient(to bottom, rgba(5, 7, 10, 0.95), #05070A);
+            position: relative;
+            overflow-x: hidden;
+        }
+
+        /* Tactical grid overlay */
+        body::before {
+            content: '';
+            position: fixed;
+            inset: 0;
+            background-image:
+                linear-gradient(rgba(245, 158, 11, 0.035) 1px, transparent 1px),
+                linear-gradient(90deg, rgba(245, 158, 11, 0.035) 1px, transparent 1px);
+            background-size: 48px 48px;
+            pointer-events: none;
+            z-index: 0;
+            mask-image: radial-gradient(ellipse at center, black 30%, transparent 90%);
+            -webkit-mask-image: radial-gradient(ellipse at center, black 30%, transparent 90%);
+        }
+
+        /* ================= HUD BOX WITH CORNER BRACKETS ================= */
+        .hud-box {
+            position: relative;
+            border: 1px solid #1E293B;
+            box-shadow:
+                0 8px 32px rgba(0, 0, 0, 0.5),
+                inset 0 1px 0 rgba(255, 255, 255, 0.02);
+            backdrop-filter: blur(8px);
+            transition: border-color 0.3s ease, box-shadow 0.3s ease;
+        }
+
+        .hud-box::before,
+        .hud-box::after {
+            content: '';
+            position: absolute;
+            width: 18px;
+            height: 18px;
+            pointer-events: none;
+            z-index: 2;
+            transition: opacity 0.3s ease;
+        }
+
+        .hud-box::before {
+            top: 8px;
+            left: 8px;
+            border-top: 1.5px solid rgba(245, 158, 11, 0.55);
+            border-left: 1.5px solid rgba(245, 158, 11, 0.55);
+            border-top-left-radius: 4px;
+        }
+
+        .hud-box::after {
+            bottom: 8px;
+            right: 8px;
+            border-bottom: 1.5px solid rgba(245, 158, 11, 0.55);
+            border-right: 1.5px solid rgba(245, 158, 11, 0.55);
+            border-bottom-right-radius: 4px;
+        }
+
+        .hud-box:hover {
+            border-color: rgba(245, 158, 11, 0.25);
+            box-shadow:
+                0 8px 40px rgba(0, 0, 0, 0.6),
+                0 0 0 1px rgba(245, 158, 11, 0.08),
+                inset 0 1px 0 rgba(255, 255, 255, 0.03);
+        }
+
+        /* ================= KPI CARDS ================= */
+        .kpi-card {
+            position: relative;
+            background: linear-gradient(135deg, rgba(17, 24, 35, 0.95), rgba(11, 15, 23, 0.95));
+            border: 1px solid #1E293B;
+            border-radius: 14px;
+            padding: 14px 16px;
+            overflow: hidden;
+            transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+        }
+
+        .kpi-card::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            height: 2px;
+            background: linear-gradient(90deg, transparent, var(--kpi-color, #F59E0B), transparent);
+            opacity: 0.7;
+        }
+
+        .kpi-card:hover {
+            transform: translateY(-2px);
+            border-color: rgba(245, 158, 11, 0.3);
+            box-shadow: 0 12px 32px rgba(0, 0, 0, 0.4), 0 0 20px rgba(245, 158, 11, 0.05);
+        }
+
+        /* ================= ANIMATIONS ================= */
+        @keyframes fadeUp {
+            from {
+                opacity: 0;
+                transform: translateY(12px);
+            }
+
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        @keyframes pulseDot {
+
+            0%,
+            100% {
+                opacity: 1;
+                transform: scale(1);
+            }
+
+            50% {
+                opacity: 0.5;
+                transform: scale(0.85);
+            }
+        }
+
+        @keyframes scanline {
+            0% {
+                transform: translateX(-100%);
+            }
+
+            100% {
+                transform: translateX(100%);
+            }
+        }
+
+        @keyframes toastIn {
+            from {
+                opacity: 0;
+                transform: translateX(100%) scale(0.9);
+            }
+
+            to {
+                opacity: 1;
+                transform: translateX(0) scale(1);
+            }
+        }
+
+        @keyframes toastOut {
+            to {
+                opacity: 0;
+                transform: translateX(100%) scale(0.9);
+            }
+        }
+
+        @keyframes shimmer {
+            0% {
+                background-position: -200% 0;
+            }
+
+            100% {
+                background-position: 200% 0;
+            }
+        }
+
+        .animate-in {
+            animation: fadeUp 0.55s cubic-bezier(0.16, 1, 0.3, 1) both;
+        }
+
+        .pulse-dot {
+            animation: pulseDot 2s ease-in-out infinite;
+        }
+
+        /* Scanline effect for header */
+        .scan-container {
+            position: relative;
+            overflow: hidden;
+        }
+
+        .scan-container::after {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 30%;
+            height: 100%;
+            background: linear-gradient(90deg, transparent, rgba(245, 158, 11, 0.06), transparent);
+            animation: scanline 6s ease-in-out infinite;
+            pointer-events: none;
+        }
+
+        /* ================= FORM ELEMENTS ================= */
+        input[type="text"],
+        input[type="number"],
+        input[type="date"],
+        select {
+            transition: all 0.25s ease;
+        }
+
+        input[type="text"]:focus,
+        input[type="number"]:focus,
+        input[type="date"]:focus,
+        select:focus {
+            box-shadow: 0 0 0 3px rgba(245, 158, 11, 0.12), 0 0 20px rgba(245, 158, 11, 0.08);
+            border-color: #F59E0B;
+        }
+
+        /* Custom select arrow */
+        select {
+            appearance: none;
+            background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%23F59E0B' stroke-width='2.5' stroke-linecap='round'%3E%3Cpolyline points='6 9 12 15 18 9'/%3E%3C/svg%3E");
+            background-repeat: no-repeat;
+            background-position: right 14px center;
+            padding-right: 38px;
+        }
+
+        /* Remove number input spinners */
+        input[type="number"]::-webkit-outer-spin-button,
+        input[type="number"]::-webkit-inner-spin-button {
+            -webkit-appearance: none;
+            margin: 0;
+        }
+
+        /* Button press effect */
+        button:active:not(:disabled) {
+            transform: scale(0.97);
+        }
+
+        /* ================= SCROLLBAR ================= */
+        .custom-scrollbar::-webkit-scrollbar {
+            width: 5px;
+            height: 5px;
+        }
+
+        .custom-scrollbar::-webkit-scrollbar-track {
+            background: transparent;
+        }
+
+        .custom-scrollbar::-webkit-scrollbar-thumb {
+            background: #1E293B;
+            border-radius: 3px;
+            transition: background 0.2s;
+        }
+
+        .custom-scrollbar::-webkit-scrollbar-thumb:hover {
+            background: #F59E0B;
+        }
+
+        /* ================= TOAST ================= */
+        #toastContainer {
+            position: fixed;
+            bottom: 20px;
+            right: 20px;
+            z-index: 100;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            pointer-events: none;
+            max-width: 90vw;
+        }
+
+        .toast-item {
+            pointer-events: auto;
+            animation: toastIn 0.35s cubic-bezier(0.16, 1, 0.3, 1);
+            min-width: 260px;
+            max-width: 380px;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
+        }
+
+        /* ================= MODAL ================= */
+        #accountModal.flex {
+            animation: fadeUp 0.3s ease both;
+        }
+
+        /* ================= PRESET CHIP ================= */
+        .preset-chip {
+            transition: all 0.2s ease;
+        }
+
+        .preset-chip:hover {
+            background: rgba(245, 158, 11, 0.1);
+            border-color: #F59E0B;
+            color: #F59E0B;
+            transform: translateY(-1px);
+        }
+
+        /* ================= ACCOUNT LIST ITEM ================= */
+        .account-item {
+            transition: all 0.2s ease;
+        }
+
+        .account-item:hover {
+            background: linear-gradient(90deg, rgba(245, 158, 11, 0.08), transparent);
+            border-color: rgba(245, 158, 11, 0.4) !important;
+            transform: translateX(3px);
+        }
+
+        /* ================= STATUS BADGE ================= */
+        .status-badge {
+            position: relative;
+        }
+
+        .status-badge.active::before {
+            content: '';
+            position: absolute;
+            left: 6px;
+            top: 50%;
+            transform: translateY(-50%);
+            width: 5px;
+            height: 5px;
+            border-radius: 50%;
+            background: #10B981;
+            box-shadow: 0 0 8px #10B981;
+            animation: pulseDot 1.5s ease-in-out infinite;
+        }
+    </style>
+</head>
+
+<body class="text-slate-200 font-sans min-h-screen p-3 md:p-6 lg:p-8 custom-scrollbar">
+
+    <div class="max-w-7xl mx-auto space-y-5 relative z-10">
+
+        <!-- ================= HEADER ================= -->
+        <header
+            class="flex flex-col md:flex-row justify-between items-start md:items-center p-5 md:p-6 bg-tactical-panel hud-box scan-container rounded-2xl gap-4 animate-in">
+            <div
+                class="absolute -top-16 -left-16 w-56 h-56 bg-tactical-gold/10 rounded-full blur-3xl pointer-events-none">
+            </div>
+            <div
+                class="absolute -bottom-20 -right-20 w-64 h-64 bg-tactical-blue/5 rounded-full blur-3xl pointer-events-none">
+            </div>
+
+            <div class="relative z-10 space-y-2">
+                <div class="flex items-center gap-2.5 flex-wrap">
+                    <span
+                        class="px-2.5 py-1 bg-tactical-gold/15 border border-tactical-gold/40 text-tactical-gold text-[10px] font-mono font-bold tracking-widest uppercase rounded-md flex items-center gap-1.5">
+                        <span class="w-1.5 h-1.5 rounded-full bg-tactical-gold pulse-dot"></span>
+                        TAC-OPS // MULTI-ACCOUNT
+                    </span>
+                    <span
+                        class="text-xs font-mono px-2.5 py-1 rounded-md bg-tactical-card border border-tactical-border"
+                        id="connectionStatus">
+                        🟡 MENGHUBUNGKAN...
+                    </span>
+                </div>
+                <h1
+                    class="text-xl md:text-2xl font-black text-white uppercase tracking-wider font-mono flex items-center gap-2.5">
+                    <span class="text-tactical-gold">⚔️</span>
+                    <span>ARENA BREAKOUT</span>
+                    <span class="text-tactical-gold/80">//</span>
+                    <span class="text-tactical-gold">LOOT TRACKER</span>
+                </h1>
+                <p class="text-[10px] font-mono text-tactical-gray uppercase tracking-widest">
+                    V2.0 // TACTICAL INTELLIGENCE SYSTEM
+                </p>
+            </div>
+
+            <!-- Quick Add Account -->
+            <div class="flex gap-2 w-full md:w-auto relative z-10">
+                <input type="text" id="newAccountInput" placeholder="NAMA AKUN BARU..."
+                    class="bg-tactical-bg border border-tactical-border text-xs font-mono rounded-xl px-4 py-2.5 text-white flex-1 md:w-60 uppercase placeholder:text-slate-600 transition-all">
+                <button onclick="addAccount()"
+                    class="bg-tactical-gold hover:bg-amber-400 text-tactical-bg font-mono font-black px-4 py-2.5 text-xs rounded-xl uppercase tracking-wider shadow-lg shadow-amber-500/20 hover:shadow-amber-500/40 transition-all whitespace-nowrap">
+                    + REG AKUN
+                </button>
+            </div>
+        </header>
+
+        <!-- ================= KPI DASHBOARD ================= -->
+        <div class="grid grid-cols-2 lg:grid-cols-4 gap-3 md:gap-4 animate-in" style="animation-delay: 80ms">
+            <!-- KPI: Operators -->
+            <div class="kpi-card" style="--kpi-color: #3B82F6;">
+                <div class="flex items-start justify-between">
+                    <div class="flex-1 min-w-0">
+                        <p class="text-[10px] font-mono text-tactical-gray uppercase tracking-widest font-bold mb-1">
+                            OPERATOR</p>
+                        <p class="text-2xl md:text-3xl font-black font-mono text-white" id="kpiTotalAccounts">0</p>
+                        <p class="text-[10px] font-mono text-tactical-gray mt-1">Akun Terdaftar</p>
+                    </div>
+                    <div class="text-2xl opacity-60">🪖</div>
+                </div>
+            </div>
+
+            <!-- KPI: Weekly Loot -->
+            <div class="kpi-card" style="--kpi-color: #F59E0B;">
+                <div class="flex items-start justify-between">
+                    <div class="flex-1 min-w-0">
+                        <p class="text-[10px] font-mono text-tactical-gray uppercase tracking-widest font-bold mb-1">
+                            LOOT 7D</p>
+                        <p class="text-2xl md:text-3xl font-black font-mono text-tactical-gold" id="kpiWeeklyLoot">0
+                        </p>
+                        <p class="text-[10px] font-mono text-tactical-gray mt-1">KOEN</p>
+                    </div>
+                    <div class="text-2xl opacity-60">💰</div>
+                </div>
+            </div>
+
+            <!-- KPI: Raids -->
+            <div class="kpi-card" style="--kpi-color: #10B981;">
+                <div class="flex items-start justify-between">
+                    <div class="flex-1 min-w-0">
+                        <p class="text-[10px] font-mono text-tactical-gray uppercase tracking-widest font-bold mb-1">
+                            TOTAL RAID</p>
+                        <p class="text-2xl md:text-3xl font-black font-mono text-tactical-green" id="kpiWeeklyRaids">0
+                        </p>
+                        <p class="text-[10px] font-mono text-tactical-gray mt-1">7 Hari Terakhir</p>
+                    </div>
+                    <div class="text-2xl opacity-60">🎯</div>
+                </div>
+            </div>
+
+            <!-- KPI: Top Operator -->
+            <div class="kpi-card" style="--kpi-color: #EC4899;">
+                <div class="flex items-start justify-between">
+                    <div class="flex-1 min-w-0">
+                        <p class="text-[10px] font-mono text-tactical-gray uppercase tracking-widest font-bold mb-1">
+                            TOP OPERATOR</p>
+                        <p class="text-base md:text-lg font-black font-mono text-pink-400 truncate" id="kpiTopOperator">
+                            —</p>
+                        <p class="text-[10px] font-mono text-tactical-gray mt-1" id="kpiTopOperatorValue">Belum ada
+                            data</p>
+                    </div>
+                    <div class="text-2xl opacity-60">👑</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- ================= MAIN GRID: INPUT & STATS ================= -->
+        <div class="grid grid-cols-1 lg:grid-cols-3 gap-5 animate-in" style="animation-delay: 160ms">
+
+            <!-- FORM INPUT (SPAN 2) -->
+            <section
+                class="lg:col-span-2 bg-tactical-panel hud-box p-5 md:p-6 rounded-2xl space-y-4 flex flex-col justify-between">
+                <div>
+                    <div class="flex items-center justify-between border-b border-tactical-border pb-3 mb-5">
+                        <h2
+                            class="text-xs font-mono font-bold text-tactical-gold uppercase tracking-widest flex items-center gap-2">
+                            <span class="text-base">🎯</span>
+                            <span id="formTitle">INPUT HASIL EKSTRAKSI (LOOT)</span>
+                        </h2>
+                        <button id="cancelEditBtn" onclick="cancelEditLoot()"
+                            class="hidden text-xs text-tactical-red hover:text-rose-300 font-mono font-bold px-2.5 py-1 rounded-md border border-tactical-red/30 hover:border-tactical-red/60 transition-all">
+                            [ BATAL EDIT ]
+                        </button>
+                    </div>
+
+                    <form id="lootForm" onsubmit="handleLootSubmit(event)"
+                        class="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                        <div>
+                            <label
+                                class="block text-[10px] font-mono text-tactical-gray mb-2 uppercase font-bold tracking-widest">
+                                PILIH AKUN</label>
+                            <select id="accountSelect" required
+                                class="w-full bg-tactical-bg border border-tactical-border rounded-xl p-3 text-xs font-mono text-white">
+                                <option value="">MEMUAT AKUN...</option>
+                            </select>
+                        </div>
+
+                        <div>
+                            <label
+                                class="block text-[10px] font-mono text-tactical-gray mb-2 uppercase font-bold tracking-widest">
+                                TOTAL LOOT</label>
+                            <div class="relative">
+                                <input type="number" id="lootValue" min="0" placeholder="0" required
+                                    class="w-full bg-tactical-bg border border-tactical-border rounded-xl p-3 pr-14 text-xs font-mono text-white font-bold">
+                                <span
+                                    class="absolute right-3 top-3 text-[10px] text-tactical-gold font-mono font-bold pointer-events-none">KOEN</span>
+                            </div>
+                            <!-- Preset Buttons -->
+                            <div class="flex gap-1.5 mt-2">
+                                <button type="button" onclick="setPresetLoot(100000)"
+                                    class="preset-chip text-[10px] font-mono bg-tactical-card border border-tactical-border text-slate-300 px-2.5 py-1 rounded-md">+100k</button>
+                                <button type="button" onclick="setPresetLoot(500000)"
+                                    class="preset-chip text-[10px] font-mono bg-tactical-card border border-tactical-border text-slate-300 px-2.5 py-1 rounded-md">+500k</button>
+                                <button type="button" onclick="setPresetLoot(1000000)"
+                                    class="preset-chip text-[10px] font-mono bg-tactical-card border border-tactical-border text-slate-300 px-2.5 py-1 rounded-md">+1M</button>
+                            </div>
+                        </div>
+
+                        <div>
+                            <label
+                                class="block text-[10px] font-mono text-tactical-gray mb-2 uppercase font-bold tracking-widest">
+                                TANGGAL RAID</label>
+                            <input type="date" id="matchDate" required
+                                class="w-full bg-tactical-bg border border-tactical-border rounded-xl p-3 text-xs font-mono text-white">
+                        </div>
+                    </form>
+                </div>
+
+                <div class="pt-4">
+                    <button type="submit" form="lootForm" id="submitLootBtn"
+                        class="w-full bg-tactical-green hover:bg-emerald-400 text-tactical-bg font-mono font-black py-3 rounded-xl uppercase text-xs tracking-widest transition-all shadow-lg shadow-emerald-500/20 hover:shadow-emerald-500/40">
+                        SIMPAN CATATAN LOOTING
+                    </button>
+                </div>
+            </section>
+
+            <!-- REKAP MINGGUAN (SPAN 1) -->
+            <section class="bg-tactical-panel hud-box p-5 md:p-6 rounded-2xl space-y-4 flex flex-col">
+                <h3
+                    class="text-xs font-mono font-bold text-slate-300 uppercase tracking-widest border-b border-tactical-border pb-3 flex items-center gap-2">
+                    <span>💰</span> AKUMULASI 7 HARI
+                </h3>
+                <div id="weeklyStats" class="space-y-2 overflow-y-auto max-h-56 custom-scrollbar pr-1 flex-1"></div>
+            </section>
+
+        </div>
+
+        <!-- ================= CHART ================= -->
+        <section class="bg-tactical-panel hud-box p-5 md:p-6 rounded-2xl space-y-4 animate-in"
+            style="animation-delay: 240ms">
+            <div class="flex justify-between items-center border-b border-tactical-border pb-3">
+                <h2
+                    class="text-xs font-mono font-bold text-tactical-gold uppercase tracking-widest flex items-center gap-2">
+                    <span>📈</span> ANALISIS PERFORMA AKUN (7 HARI)
+                </h2>
+                <span class="text-[10px] font-mono text-tactical-gray flex items-center gap-1.5">
+                    <span class="w-1.5 h-1.5 rounded-full bg-tactical-green pulse-dot"></span>
+                    REALTIME
+                </span>
+            </div>
+            <div class="relative w-full h-72 md:h-80">
+                <canvas id="lootChart"></canvas>
+                <div id="chartEmptyState"
+                    class="hidden absolute inset-0 flex flex-col items-center justify-center text-center">
+                    <span class="text-4xl mb-2 opacity-40">📊</span>
+                    <p class="text-xs font-mono text-tactical-gray uppercase tracking-widest">Belum ada data</p>
+                    <p class="text-[10px] font-mono text-slate-600 mt-1">Tambahkan akun & catatan loot untuk melihat
+                        analisis</p>
+                </div>
+            </div>
+        </section>
+
+        <!-- ================= BOTTOM GRID ================= -->
+        <div class="grid grid-cols-1 lg:grid-cols-3 gap-5 animate-in" style="animation-delay: 320ms">
+
+            <!-- DAFTAR AKUN -->
+            <section class="bg-tactical-panel hud-box p-5 md:p-6 rounded-2xl space-y-3 flex flex-col">
+                <div class="border-b border-tactical-border pb-3">
+                    <h3
+                        class="text-xs font-mono font-bold text-slate-300 uppercase tracking-widest flex items-center gap-2">
+                        <span>🎮</span> DAFTAR AKUN OPERATOR
+                    </h3>
+                    <p class="text-[10px] font-mono text-tactical-gray mt-1">Klik akun untuk kelola</p>
+                </div>
+                <div id="accountListContainer" class="space-y-2 overflow-y-auto max-h-64 custom-scrollbar pr-1 flex-1">
+                </div>
+            </section>
+
+            <!-- STATUS HARIAN -->
+            <section class="lg:col-span-2 bg-tactical-panel hud-box p-5 md:p-6 rounded-2xl space-y-4 flex flex-col">
+                <div
+                    class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 border-b border-tactical-border pb-3">
+                    <h2
+                        class="text-xs font-mono font-bold text-tactical-gold uppercase tracking-widest flex items-center gap-2">
+                        <span>📋</span> STATUS RAID HARIAN
+                    </h2>
+                    <input type="date" id="filterDate" onchange="renderDailyLog()"
+                        class="bg-tactical-bg border border-tactical-border text-xs font-mono rounded-xl p-2.5 text-white">
+                </div>
+                <div id="dailyLogContainer"
+                    class="grid grid-cols-1 sm:grid-cols-2 gap-3 overflow-y-auto max-h-64 custom-scrollbar pr-1"></div>
+            </section>
+
+        </div>
+
+    </div>
+
+    <!-- ================= MODAL ================= -->
+    <div id="accountModal"
+        class="fixed inset-0 bg-black/85 backdrop-blur-md hidden items-center justify-center p-4 z-50">
+        <div
+            class="bg-tactical-panel hud-box w-full max-w-2xl rounded-2xl p-6 space-y-5 max-h-[90vh] overflow-y-auto custom-scrollbar relative">
+
+            <div class="flex justify-between items-start border-b border-tactical-border pb-4 gap-3">
+                <div>
+                    <h3 id="modalAccountName"
+                        class="text-sm font-mono font-bold text-tactical-gold uppercase tracking-wider">
+                        KELOLA AKUN</h3>
+                    <p class="text-[10px] font-mono text-tactical-gray mt-1">Ubah nama, hapus akun, atau kelola riwayat
+                    </p>
+                </div>
+                <button onclick="closeModal()"
+                    class="text-tactical-gray hover:text-white font-mono text-xs px-3 py-1.5 bg-tactical-bg border border-tactical-border rounded-xl transition-all hover:border-tactical-red/50 whitespace-nowrap">
+                    ✕ TUTUP
+                </button>
+            </div>
+
+            <!-- Update/Hapus Nama -->
+            <div class="space-y-2 bg-tactical-bg p-4 rounded-xl border border-tactical-border">
+                <label class="block text-[10px] font-mono text-tactical-gray uppercase font-bold tracking-widest">UBAH
+                    NAMA AKUN</label>
+                <div class="flex flex-col sm:flex-row gap-2">
+                    <input type="text" id="editAccountNameInput"
+                        class="bg-tactical-card border border-tactical-border text-xs font-mono rounded-xl px-3.5 py-2.5 text-white flex-1 uppercase">
+                    <div class="flex gap-2">
+                        <button onclick="updateAccountName()"
+                            class="bg-tactical-blue hover:bg-blue-600 text-white font-mono font-bold px-4 py-2.5 text-xs rounded-xl uppercase transition flex-1 sm:flex-initial">UPDATE</button>
+                        <button onclick="deleteAccount()"
+                            class="bg-tactical-red hover:bg-rose-600 text-white font-mono font-bold px-3.5 py-2.5 text-xs rounded-xl uppercase transition flex-1 sm:flex-initial">HAPUS</button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Riwayat -->
+            <div class="space-y-2.5">
+                <h4
+                    class="text-[10px] font-mono font-bold text-slate-300 uppercase tracking-widest flex items-center gap-2">
+                    <span>📜</span> RIWAYAT EXTRACTION
+                </h4>
+                <div id="modalLootHistory" class="space-y-2 max-h-64 overflow-y-auto custom-scrollbar pr-1"></div>
+            </div>
+
+        </div>
+    </div>
+
+    <!-- ================= TOAST CONTAINER ================= -->
+    <div id="toastContainer"></div>
+
+    <script>
+        // =========================================================================
+        // KONFIGURASI SUPABASE
+        // =========================================================================
+        const SUPABASE_URL = "https://ousykmdyznhsbijvevaw.supabase.co";
+        const SUPABASE_ANON_KEY = "sb_publishable_aVOsZXtgYoQDq0ZsFYqcdg_k_1TcITX";
+        // =========================================================================
+
+        let supabaseClient = null;
+        let accounts = [];
+        let lootLogs = [];
+        let chartInstance = null;
+        let activeAccountId = null;
+        let editingLootId = null;
+
+        const COLOR_PALETTE = ['#F59E0B', '#10B981', '#3B82F6', '#EC4899', '#8B5CF6', '#06B6D4'];
+
+        // ================= TOAST SYSTEM =================
+        function showToast(message, type = 'success') {
+            const container = document.getElementById('toastContainer');
+            const config = {
+                success: { border: 'border-emerald-500/40', bg: 'bg-emerald-500/10', text: 'text-emerald-300', icon: '✓' },
+                error: { border: 'border-rose-500/40', bg: 'bg-rose-500/10', text: 'text-rose-300', icon: '✕' },
+                info: { border: 'border-blue-500/40', bg: 'bg-blue-500/10', text: 'text-blue-300', icon: 'ℹ' },
+                warning: { border: 'border-amber-500/40', bg: 'bg-amber-500/10', text: 'text-amber-300', icon: '⚠' }
+            };
+            const c = config[type] || config.info;
+
+            const toast = document.createElement('div');
+            toast.className = `toast-item flex items-center gap-3 px-4 py-3 rounded-xl border backdrop-blur-md font-mono text-[11px] font-semibold uppercase tracking-wider ${c.border} ${c.bg} ${c.text}`;
+            toast.innerHTML = `<span class="text-base leading-none">${c.icon}</span><span class="flex-1">${message}</span>`;
+            container.appendChild(toast);
+
+            setTimeout(() => {
+                toast.style.animation = 'toastOut 0.3s ease forwards';
+                setTimeout(() => toast.remove(), 300);
+            }, 3200);
+        }
+
+        window.onload = async () => {
+            const today = new Date().toISOString().split('T')[0];
+            document.getElementById('matchDate').value = today;
+            document.getElementById('filterDate').value = today;
+
+            if (SUPABASE_URL.includes("YOUR_PROJECT_ID") || !SUPABASE_ANON_KEY || SUPABASE_ANON_KEY === "YOUR_ANON_KEY") {
+                updateStatus("🔴 URL/KEY SUPABASE BELUM DIISI", "error");
+                showToast("Supabase URL & Anon Key belum diisi!", "warning");
+                return;
+            }
+
+            try {
+                supabaseClient = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+                updateStatus("🟢 SUPABASE ONLINE", "success");
+            } catch (err) {
+                updateStatus("🔴 KONEKSI GAGAL", "error");
+                showToast("Gagal koneksi ke Supabase", "error");
+                return;
+            }
+
+            await loadData();
+        };
+
+        function updateStatus(text, type) {
+            const el = document.getElementById('connectionStatus');
+            el.innerText = text;
+            const base = "text-xs font-mono px-2.5 py-1 rounded-md border flex items-center gap-1.5 ";
+            if (type === "success") {
+                el.className = base + "bg-emerald-500/10 text-emerald-400 border-emerald-500/30 status-badge active pl-4";
+            } else if (type === "error") {
+                el.className = base + "bg-rose-500/10 text-rose-400 border-rose-500/30";
+            } else {
+                el.className = base + "bg-amber-500/10 text-amber-400 border-amber-500/30";
+            }
+        }
+
+        async function loadData() {
+            await fetchAccounts();
+            await fetchLogs();
+
+            renderAccountDropdown();
+            renderAccountList();
+            renderChart();
+            renderStats();
+            renderKPIs();
+            renderDailyLog();
+
+            if (activeAccountId) openAccountModal(activeAccountId);
+        }
+
+        // ================= FETCH =================
+        async function fetchAccounts() {
+            if (!supabaseClient) return;
+            const { data, error } = await supabaseClient
+                .from('game_accounts').select('*').order('created_at', { ascending: true });
+            if (error) { console.error("Error akun:", error.message); accounts = []; }
+            else accounts = data || [];
+        }
+
+        async function fetchLogs() {
+            if (!supabaseClient) return;
+            const { data, error } = await supabaseClient
+                .from('loot_logs').select('*').order('match_date', { ascending: false });
+            if (error) { console.error("Error logs:", error.message); lootLogs = []; }
+            else lootLogs = data || [];
+        }
+
+        // ================= ACTIONS =================
+        async function addAccount() {
+            const input = document.getElementById('newAccountInput');
+            const name = input.value.trim();
+            if (!name) return showToast('Masukkan nama akun baru!', 'warning');
+
+            const { error } = await supabaseClient.from('game_accounts').insert([{ account_name: name }]);
+            if (error) showToast('Gagal tambah akun: ' + error.message, 'error');
+            else {
+                input.value = '';
+                showToast('Akun berhasil didaftarkan', 'success');
+                await loadData();
+            }
+        }
+
+        async function handleLootSubmit(e) {
+            e.preventDefault();
+            const account_id = document.getElementById('accountSelect').value;
+            const loot_value = parseInt(document.getElementById('lootValue').value);
+            const match_date = document.getElementById('matchDate').value;
+
+            if (!account_id) return showToast('Pilih akun operator terlebih dahulu!', 'warning');
+
+            if (editingLootId) {
+                const { error } = await supabaseClient.from('loot_logs')
+                    .update({ account_id, loot_value, match_date }).eq('id', editingLootId);
+                if (error) showToast('Gagal memperbarui loot: ' + error.message, 'error');
+                else {
+                    cancelEditLoot();
+                    showToast('Data loot berhasil diperbarui', 'success');
+                    await loadData();
+                }
+            } else {
+                const { error } = await supabaseClient.from('loot_logs').insert([{ account_id, loot_value, match_date }]);
+                if (error) showToast('Gagal menyimpan loot: ' + error.message, 'error');
+                else {
+                    document.getElementById('lootValue').value = '';
+                    showToast('Catatan loot berhasil disimpan', 'success');
+                    await loadData();
+                }
+            }
+        }
+
+        function editLoot(id, accountId, value, date) {
+            editingLootId = id;
+            document.getElementById('accountSelect').value = accountId;
+            document.getElementById('lootValue').value = value;
+            document.getElementById('matchDate').value = date;
+            document.getElementById('formTitle').innerText = "EDIT CATATAN LOOTING";
+            document.getElementById('cancelEditBtn').classList.remove('hidden');
+
+            const btn = document.getElementById('submitLootBtn');
+            btn.innerText = "UPDATE DATA LOOTING";
+            btn.className = "w-full bg-tactical-blue hover:bg-blue-600 text-white font-mono font-black py-3 rounded-xl uppercase text-xs tracking-widest transition-all shadow-lg shadow-blue-500/20 hover:shadow-blue-500/40";
+
+            closeModal();
+            window.scrollTo({ top: 0, behavior: 'smooth' });
+            showToast('Mode edit diaktifkan', 'info');
+        }
+
+        function cancelEditLoot() {
+            editingLootId = null;
+            document.getElementById('lootValue').value = '';
+            document.getElementById('formTitle').innerText = "INPUT HASIL EKSTRAKSI (LOOT)";
+            document.getElementById('cancelEditBtn').classList.add('hidden');
+
+            const btn = document.getElementById('submitLootBtn');
+            btn.innerText = "SIMPAN CATATAN LOOTING";
+            btn.className = "w-full bg-tactical-green hover:bg-emerald-400 text-tactical-bg font-mono font-black py-3 rounded-xl uppercase text-xs tracking-widest transition-all shadow-lg shadow-emerald-500/20 hover:shadow-emerald-500/40";
+        }
+
+        async function deleteLoot(id) {
+            if (!confirm("Hapus catatan looting ini?")) return;
+            const { error } = await supabaseClient.from('loot_logs').delete().eq('id', id);
+            if (error) showToast('Gagal menghapus: ' + error.message, 'error');
+            else {
+                showToast('Catatan loot dihapus', 'success');
+                await loadData();
+            }
+        }
+
+        function setPresetLoot(val) {
+            const current = parseInt(document.getElementById('lootValue').value) || 0;
+            document.getElementById('lootValue').value = current + val;
+        }
+
+        // ================= RENDER ACCOUNTS =================
+        function renderAccountDropdown() {
+            const select = document.getElementById('accountSelect');
+            if (accounts.length === 0) {
+                select.innerHTML = `<option value="">BELUM ADA AKUN TERDAFTAR</option>`;
+                return;
+            }
+            select.innerHTML = accounts.map(acc => `<option value="${acc.id}">${acc.account_name}</option>`).join('');
+        }
+
+        function renderAccountList() {
+            const container = document.getElementById('accountListContainer');
+            container.innerHTML = '';
+
+            if (accounts.length === 0) {
+                container.innerHTML = `
+                    <div class="flex flex-col items-center justify-center py-8 text-center">
+                        <span class="text-3xl mb-2 opacity-40">🪖</span>
+                        <p class="text-[11px] font-mono text-tactical-gray uppercase tracking-widest">Belum ada akun</p>
+                        <p class="text-[10px] font-mono text-slate-600 mt-1">Daftarkan operator di atas</p>
+                    </div>`;
+                return;
+            }
+
+            accounts.forEach(acc => {
+                const totalLoot = lootLogs.filter(l => l.account_id === acc.id).reduce((s, l) => s + l.loot_value, 0);
+                container.innerHTML += `
+                    <div onclick="openAccountModal('${acc.id}')"
+                        class="account-item flex justify-between items-center bg-tactical-bg p-3 rounded-xl border border-tactical-border cursor-pointer">
+                        <div class="min-w-0 flex-1">
+                            <p class="font-mono text-xs font-bold text-white truncate">🪖 ${acc.account_name}</p>
+                            <p class="text-[10px] font-mono text-tactical-gold mt-0.5">${totalLoot.toLocaleString('id-ID')} KOEN</p>
+                        </div>
+                        <span class="text-[10px] font-mono text-tactical-gold bg-tactical-gold/10 px-2.5 py-1 rounded-lg border border-tactical-gold/20 whitespace-nowrap ml-2">KELOLA →</span>
+                    </div>`;
+            });
+        }
+
+        // ================= MODAL =================
+        function openAccountModal(accountId) {
+            activeAccountId = accountId;
+            const acc = accounts.find(a => a.id === accountId);
+            if (!acc) return;
+
+            document.getElementById('modalAccountName').innerText = `OPERATOR: ${acc.account_name}`;
+            document.getElementById('editAccountNameInput').value = acc.account_name;
+
+            const historyContainer = document.getElementById('modalLootHistory');
+            const accLogs = lootLogs.filter(l => l.account_id === accountId);
+
+            if (accLogs.length === 0) {
+                historyContainer.innerHTML = `
+                    <div class="flex flex-col items-center justify-center py-6 text-center bg-tactical-bg rounded-xl border border-dashed border-tactical-border">
+                        <span class="text-2xl mb-2 opacity-40">📭</span>
+                        <p class="text-[11px] font-mono text-tactical-gray uppercase tracking-widest">Belum ada riwayat</p>
+                    </div>`;
+            } else {
+                historyContainer.innerHTML = accLogs.map(l => `
+                    <div class="flex justify-between items-center bg-tactical-bg p-3 rounded-xl border border-tactical-border text-xs hover:border-tactical-gold/40 transition">
+                        <div>
+                            <p class="font-bold text-tactical-gold font-mono text-sm">${l.loot_value.toLocaleString('id-ID')} <span class="text-[10px] text-slate-400">KOEN</span></p>
+                            <p class="text-tactical-gray text-[10px] font-mono mt-0.5">📅 ${l.match_date}</p>
+                        </div>
+                        <div class="flex gap-1.5">
+                            <button onclick="editLoot('${l.id}', '${l.account_id}', ${l.loot_value}, '${l.match_date}')"
+                                class="bg-tactical-blue hover:bg-blue-600 text-white px-2.5 py-1 rounded-lg font-mono text-[10px] uppercase font-bold transition">EDIT</button>
+                            <button onclick="deleteLoot('${l.id}')"
+                                class="bg-tactical-red hover:bg-rose-600 text-white px-2.5 py-1 rounded-lg font-mono text-[10px] uppercase font-bold transition">HAPUS</button>
+                        </div>
+                    </div>`).join('');
+            }
+
+            document.getElementById('accountModal').classList.remove('hidden');
+            document.getElementById('accountModal').classList.add('flex');
+        }
+
+        function closeModal() {
+            document.getElementById('accountModal').classList.remove('flex');
+            document.getElementById('accountModal').classList.add('hidden');
+            activeAccountId = null;
+        }
+
+        async function updateAccountName() {
+            const newName = document.getElementById('editAccountNameInput').value.trim();
+            if (!newName) return showToast('Nama akun tidak boleh kosong!', 'warning');
+
+            const { error } = await supabaseClient.from('game_accounts')
+                .update({ account_name: newName }).eq('id', activeAccountId);
+            if (error) showToast('Gagal update nama akun: ' + error.message, 'error');
+            else {
+                showToast('Nama akun berhasil diperbarui', 'success');
+                await loadData();
+            }
+        }
+
+        async function deleteAccount() {
+            if (!confirm("PERINGATAN: Menghapus akun ini juga akan menghapus seluruh data looting di dalamnya secara permanen. Lanjutkan?")) return;
+
+            const { error } = await supabaseClient.from('game_accounts').delete().eq('id', activeAccountId);
+            if (error) showToast('Gagal menghapus akun: ' + error.message, 'error');
+            else {
+                closeModal();
+                showToast('Akun berhasil dihapus', 'success');
+                await loadData();
+            }
+        }
+
+        // ================= CHART =================
+        function renderChart() {
+            const ctx = document.getElementById('lootChart').getContext('2d');
+            const emptyState = document.getElementById('chartEmptyState');
+
+            if (accounts.length === 0) {
+                emptyState.classList.remove('hidden');
+                if (chartInstance) { chartInstance.destroy(); chartInstance = null; }
+                return;
+            }
+            emptyState.classList.add('hidden');
+
+            const last7Days = Array.from({ length: 7 }, (_, i) => {
+                const d = new Date();
+                d.setDate(d.getDate() - (6 - i));
+                return d.toISOString().split('T')[0];
+            });
+
+            const datasets = accounts.map((acc, index) => {
+                const color = COLOR_PALETTE[index % COLOR_PALETTE.length];
+                const data = last7Days.map(date =>
+                    lootLogs
+                        .filter(log => log.account_id === acc.id && log.match_date === date)
+                        .reduce((sum, log) => sum + log.loot_value, 0)
+                );
+
+                const gradient = ctx.createLinearGradient(0, 0, 0, 320);
+                gradient.addColorStop(0, color + '55');
+                gradient.addColorStop(1, color + '00');
+
+                return {
+                    label: acc.account_name,
+                    data: data,
+                    borderColor: color,
+                    backgroundColor: gradient,
+                    fill: true,
+                    tension: 0.35,
+                    borderWidth: 2.5,
+                    pointRadius: 3,
+                    pointHoverRadius: 7,
+                    pointBackgroundColor: color,
+                    pointBorderColor: '#05070A',
+                    pointBorderWidth: 2,
+                    pointHoverBorderWidth: 2
+                };
+            });
+
+            if (chartInstance) chartInstance.destroy();
+
+            chartInstance = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: last7Days.map(d => {
+                        const dt = new Date(d + 'T00:00:00');
+                        return dt.toLocaleDateString('id-ID', { day: '2-digit', month: 'short' });
+                    }), datasets
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    interaction: { mode: 'index', intersect: false },
+                    plugins: {
+                        legend: {
+                            labels: {
+                                color: '#94A3B8',
+                                font: { family: 'Courier New', size: 11, weight: 'bold' },
+                                boxWidth: 12,
+                                boxHeight: 12,
+                                usePointStyle: true,
+                                pointStyle: 'rectRounded',
+                                padding: 16
+                            }
+                        },
+                        tooltip: {
+                            backgroundColor: '#0B0F17',
+                            borderColor: '#1E293B',
+                            borderWidth: 1,
+                            titleColor: '#F59E0B',
+                            bodyColor: '#E2E8F0',
+                            padding: 12,
+                            cornerRadius: 8,
+                            titleFont: { family: 'Courier New', size: 11, weight: 'bold' },
+                            bodyFont: { family: 'Courier New', size: 11 },
+                            displayColors: true,
+                            callbacks: {
+                                label: (c) => ` ${c.dataset.label}: ${c.parsed.y.toLocaleString('id-ID')} KOEN`
+                            }
+                        }
+                    },
+                    scales: {
+                        x: {
+                            ticks: { color: '#64748B', font: { family: 'Courier New', size: 10 } },
+                            grid: { color: 'rgba(30, 41, 59, 0.4)', drawBorder: false }
+                        },
+                        y: {
+                            beginAtZero: true,
+                            ticks: {
+                                color: '#64748B',
+                                font: { family: 'Courier New', size: 10 },
+                                callback: (v) => {
+                                    if (v >= 1000000) return (v / 1000000).toFixed(1) + 'M';
+                                    if (v >= 1000) return (v / 1000).toFixed(0) + 'K';
+                                    return v;
+                                }
+                            },
+                            grid: { color: 'rgba(30, 41, 59, 0.4)', drawBorder: false }
+                        }
+                    }
+                }
+            });
+        }
+
+        // ================= STATS =================
+        function renderStats() {
+            const now = new Date();
+            const date7DaysAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+            const container = document.getElementById('weeklyStats');
+            container.innerHTML = '';
+
+            if (accounts.length === 0) {
+                container.innerHTML = `
+                    <div class="flex flex-col items-center justify-center py-6 text-center">
+                        <span class="text-2xl mb-2 opacity-40">📊</span>
+                        <p class="text-[10px] font-mono text-tactical-gray uppercase tracking-widest">Tidak ada akun</p>
+                    </div>`;
+                return;
+            }
+
+            // Sort by total weekly loot desc
+            const ranked = accounts.map(acc => ({
+                ...acc,
+                weekly: lootLogs
+                    .filter(l => l.account_id === acc.id && l.match_date >= date7DaysAgo)
+                    .reduce((sum, l) => sum + l.loot_value, 0)
+            })).sort((a, b) => b.weekly - a.weekly);
+
+            ranked.forEach((acc, idx) => {
+                const medal = idx === 0 ? '🥇' : idx === 1 ? '🥈' : idx === 2 ? '🥉' : '▪';
+                container.innerHTML += `
+                    <div class="flex justify-between items-center text-xs bg-tactical-bg p-2.5 rounded-xl border border-tactical-border font-mono hover:border-tactical-gold/30 transition">
+                        <span class="text-slate-300 font-bold truncate pr-2 flex items-center gap-2">
+                            <span class="text-sm">${medal}</span>
+                            <span class="truncate">${acc.account_name}</span>
+                        </span>
+                        <span class="font-bold text-tactical-gold whitespace-nowrap text-[11px]">${acc.weekly.toLocaleString('id-ID')}</span>
+                    </div>`;
+            });
+        }
+
+        // ================= KPI =================
+        function renderKPIs() {
+            const now = new Date();
+            const date7DaysAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+            const weeklyLogs = lootLogs.filter(l => l.match_date >= date7DaysAgo);
+
+            document.getElementById('kpiTotalAccounts').innerText = accounts.length;
+            document.getElementById('kpiWeeklyLoot').innerText = weeklyLogs
+                .reduce((s, l) => s + l.loot_value, 0).toLocaleString('id-ID');
+            document.getElementById('kpiWeeklyRaids').innerText = weeklyLogs.length;
+
+            if (accounts.length === 0) {
+                document.getElementById('kpiTopOperator').innerText = '—';
+                document.getElementById('kpiTopOperatorValue').innerText = 'Belum ada data';
+                return;
+            }
+
+            const totals = accounts.map(acc => ({
+                name: acc.account_name,
+                total: weeklyLogs.filter(l => l.account_id === acc.id).reduce((s, l) => s + l.loot_value, 0)
+            })).sort((a, b) => b.total - a.total);
+
+            const top = totals[0];
+            document.getElementById('kpiTopOperator').innerText = top.name;
+            document.getElementById('kpiTopOperatorValue').innerText = top.total.toLocaleString('id-ID') + ' KOEN';
+        }
+
+        // ================= DAILY LOG =================
+        function renderDailyLog() {
+            const selectedDate = document.getElementById('filterDate').value;
+            const container = document.getElementById('dailyLogContainer');
+            container.innerHTML = '';
+
+            if (accounts.length === 0) {
+                container.innerHTML = `
+                    <div class="col-span-full flex flex-col items-center justify-center py-6 text-center">
+                        <span class="text-2xl mb-2 opacity-40">📋</span>
+                        <p class="text-[10px] font-mono text-tactical-gray uppercase tracking-widest">Belum ada akun</p>
+                    </div>`;
+                return;
+            }
+
+            accounts.forEach(acc => {
+                const accLogs = lootLogs.filter(l => l.account_id === acc.id && l.match_date === selectedDate);
+                const totalDayLoot = accLogs.reduce((sum, l) => sum + l.loot_value, 0);
+                const isPlayed = accLogs.length > 0;
+
+                container.innerHTML += `
+                    <div class="p-3.5 rounded-xl border transition-all ${isPlayed
+                        ? 'bg-tactical-bg border-tactical-green/40 shadow-sm shadow-emerald-500/5 hover:border-tactical-green/60'
+                        : 'bg-tactical-bg/40 border-tactical-border hover:border-tactical-red/30'}">
+                        <div class="flex justify-between items-center">
+                            <h4 class="font-bold text-white text-xs font-mono uppercase truncate pr-2">${acc.account_name}</h4>
+                            <span class="text-[9px] font-mono px-2 py-0.5 rounded tracking-wider uppercase font-bold ${isPlayed
+                        ? 'bg-tactical-green/15 text-tactical-green border border-tactical-green/40'
+                        : 'bg-tactical-red/15 text-tactical-red border border-tactical-red/40'}">
+                                ${isPlayed ? '✓ EXTRACTED' : '✕ MIA'}
+                            </span>
+                        </div>
+                        <div class="mt-2.5">
+                            ${isPlayed ? `
+                                <p class="text-base font-black text-tactical-green font-mono">${totalDayLoot.toLocaleString('id-ID')} <span class="text-[10px] text-slate-400 font-normal">KOEN</span></p>
+                                <p class="text-[9px] font-mono text-tactical-gray mt-0.5">${accLogs.length} Sesi Raid</p>
+                            ` : `
+                                <p class="text-[11px] font-mono text-tactical-red italic font-medium">Lupa input / tidak bermain</p>
+                            `}
+                        </div>
+                    </div>`;
+            });
+        }
+    </script>
+</body>
+
+</html>
